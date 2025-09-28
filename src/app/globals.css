@@ -27,7 +27,7 @@ body::before {
   right: 0;
   bottom: 0;
   background: url('/img/bg.jpg') center/cover no-repeat fixed;
-  filter: blur(5px);
+  filter: blur(3px);
   z-index: -2;
 }
 
