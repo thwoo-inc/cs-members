@@ -3,7 +3,6 @@
 
 import dynamic from 'next/dynamic';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import * as d3 from 'd3-geo';
 import { forceX, forceY, forceCollide, forceManyBody } from 'd3-force';
 import { Member } from '@/types/member';
 import { getPrefectureCoordinate } from '@/data/prefecture';
@@ -14,12 +13,31 @@ const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), {
   loading: () => <div>Loading...</div>,
 });
 
+type DisplayMode = 'initial' | 'thumbnail';
+
+interface GraphNode {
+  id: string;
+  name: string;
+  pref: string;
+  firstChar: string;
+  avatarPath: string;
+  _targetX: number;
+  _targetY: number;
+  x: number;
+  y: number;
+}
+
 export default function MemberGeoGraph({ members }: { members: Member[] }) {
   const ref = useRef<any>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [clickPosition, setClickPosition] = useState<{ x: number; y: number } | null>(null);
+  const [displayMode, setDisplayMode] = useState<DisplayMode>('initial');
   const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // 画像キャッシュ
+  const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
+  const [imagesLoaded, setImagesLoaded] = useState(false);
 
   // --- 1) 緯度経度を画面比率に合わせて線形マッピングするプロジェクタ ---
   // 緯度経度の歪み補正は行わず、単純に lng/lat を [0..width] / [0..height] に線形変換する
@@ -77,10 +95,17 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
         const [x0, y0] = projection([coords.lng, coords.lat]) as [number, number];
         // 初期位置は重心 + 微小ジッター
         const jitter = () => (Math.random() - 0.5) * 8;
+
+        // アバター画像パスを事前に計算（01-20のループ）
+        const avatarIndex = ((index % 20) + 1).toString().padStart(2, '0');
+        const avatarPath = `/img/avator${avatarIndex}.png`;
+
         return {
           id: `${index}-${m.name}`,
           name: m.name,
           pref: m.prefecture,
+          firstChar: m.name ? m.name.charAt(0) : '?',
+          avatarPath: avatarPath,
           _targetX: x0,
           _targetY: y0,
           x: x0 + jitter(),
@@ -90,6 +115,52 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
       .filter((node): node is NonNullable<typeof node> => node !== null);
     return { nodes, links: [] };
   }, [members, projection]);
+
+  // アバター画像を事前に読み込んでキャッシュ
+  useEffect(() => {
+    const loadImages = async () => {
+      const imagePromises: Promise<void>[] = [];
+
+      // 01-20の画像を事前読み込み
+      for (let i = 1; i <= 20; i++) {
+        const index = i.toString().padStart(2, '0');
+        const path = `/img/avator${index}.png`;
+
+        if (!imageCache.current.has(path)) {
+          const promise = new Promise<void>((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+              imageCache.current.set(path, img);
+              resolve();
+            };
+            img.onerror = () => {
+              // エラーの場合もresolveして処理を続行
+              resolve();
+            };
+            img.src = path;
+          });
+          imagePromises.push(promise);
+        }
+      }
+
+      await Promise.all(imagePromises);
+      setImagesLoaded(true);
+    };
+
+    loadImages();
+  }, []);
+
+  // 画像読み込み完了後にグラフを更新
+  useEffect(() => {
+    if (imagesLoaded && ref.current) {
+      // 少し遅延を入れてから再描画（キャッシュが完全に反映されるまで）
+      setTimeout(() => {
+        if (ref.current) {
+          ref.current.refresh?.();
+        }
+      }, 100);
+    }
+  }, [imagesLoaded]);
 
   // 画面サイズの監視
   useEffect(() => {
@@ -110,8 +181,8 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
 
     // --- 3) d3-force のカスタム設定 ---
     // 居住地の基準点へ引き寄せ（適度な強さで継続的な動きを作る）
-    ref.current.d3Force('x', forceX((n: any) => n._targetX).strength(0.3));
-    ref.current.d3Force('y', forceY((n: any) => n._targetY).strength(0.3));
+    ref.current.d3Force('x', forceX((n: GraphNode) => n._targetX).strength(0.3));
+    ref.current.d3Force('y', forceY((n: GraphNode) => n._targetY).strength(0.3));
 
     // ほどよい反発（動きを維持するために少し強めに）
     ref.current.d3Force('charge', forceManyBody().strength(-12));
@@ -138,6 +209,28 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
 
   return (
     <div ref={containerRef} className="relative w-full h-full" style={{ touchAction: 'none' }}>
+      {/* タブ切り替えUI */}
+      <div className="absolute top-[72px] sm:top-[108px] left-4 z-50 flex bg-white/90 backdrop-blur-sm rounded-lg shadow-md overflow-hidden">
+        <button
+          onClick={() => setDisplayMode('initial')}
+          className={`px-4 py-2 text-sm font-medium transition-colors ${
+            displayMode === 'initial' ? 'bg-blue-500 text-white' : 'text-gray-700 hover:bg-gray-100'
+          }`}
+        >
+          頭文字
+        </button>
+        <button
+          onClick={() => setDisplayMode('thumbnail')}
+          className={`px-4 py-2 text-sm font-medium transition-colors ${
+            displayMode === 'thumbnail'
+              ? 'bg-blue-500 text-white'
+              : 'text-gray-700 hover:bg-gray-100'
+          }`}
+        >
+          サムネイル
+        </button>
+      </div>
+
       <ForceGraph2D
         ref={ref}
         graphData={data}
@@ -154,32 +247,62 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
         enablePanInteraction={true}
         minZoom={0.25}
         maxZoom={12}
-        // カスタムノード描画: 名前の先頭1文字を丸いアバターで表示
-        nodeCanvasObject={(node: any, ctx: CanvasRenderingContext2D, scale: number) => {
-          const firstChar = node.name ? node.name.charAt(0) : '?';
+        // カスタムノード描画: 表示モードに応じて頭文字またはアバター画像を表示
+        nodeCanvasObject={(node: any, ctx: CanvasRenderingContext2D) => {
           const radius = 20;
 
           // 都道府県の色情報を取得
           const prefectureInfo = getPrefectureCoordinate(node.pref);
           const prefectureColor = prefectureInfo?.color || '#333';
 
-          // 円形の背景を描画（白背景）
-          ctx.fillStyle = '#fff';
-          ctx.beginPath();
-          ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
-          ctx.fill();
+          if (displayMode === 'thumbnail') {
+            // サムネイル表示モード: キャッシュされたアバター画像を使用
+            const cachedImage = imageCache.current.get(node.avatarPath);
 
-          // 円形のボーダーを描画（都道府県の色）
-          ctx.strokeStyle = prefectureColor;
-          ctx.lineWidth = 3;
-          ctx.stroke();
+            ctx.save();
 
-          // 文字を描画
-          ctx.fillStyle = '#333';
-          ctx.font = '20px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(firstChar, node.x, node.y);
+            // 円形クリッピングパスを設定
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
+            ctx.closePath();
+            ctx.clip();
+
+            // キャッシュされた画像があれば描画、なければ白背景
+            if (cachedImage && cachedImage.complete && cachedImage.naturalWidth !== 0) {
+              ctx.drawImage(cachedImage, node.x - radius, node.y - radius, radius * 2, radius * 2);
+            } else {
+              // フォールバック: 白背景
+              ctx.fillStyle = '#fff';
+              ctx.fill();
+            }
+
+            ctx.restore();
+
+            // 円形のボーダーを描画（都道府県の色）
+            ctx.strokeStyle = prefectureColor;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
+            ctx.stroke();
+          } else {
+            // 頭文字表示モード: 事前設定された頭文字を使用
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 円形のボーダーを描画（都道府県の色）
+            ctx.strokeStyle = prefectureColor;
+            ctx.lineWidth = 3;
+            ctx.stroke();
+
+            // 文字を描画
+            ctx.fillStyle = '#333';
+            ctx.font = '20px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(node.firstChar, node.x, node.y);
+          }
         }}
         // 当たり判定を広めに（スマホ向け）
         nodePointerAreaPaint={(node: any, color: string, ctx: CanvasRenderingContext2D) => {
@@ -191,6 +314,16 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
         // アバターモードを設定
         nodeCanvasObjectMode={() => 'replace'}
         onBackgroundClick={() => {
+          setSelectedMember(null);
+          setClickPosition(null);
+        }}
+        onZoom={() => {
+          // ズーム操作時にツールチップを閉じる
+          setSelectedMember(null);
+          setClickPosition(null);
+        }}
+        onZoomEnd={() => {
+          // ズーム終了時にもツールチップを閉じる（念のため）
           setSelectedMember(null);
           setClickPosition(null);
         }}
