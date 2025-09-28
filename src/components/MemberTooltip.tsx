@@ -47,19 +47,20 @@ const MemberTooltip = ({
 
   return (
     <div
-      className={`absolute z-50 bg-white rounded-lg shadow-lg border-2 px-3 py-2 max-w-sm pointer-events-none transform -translate-x-1/2 ${getBorderColorClass(prefectureColor)}`}
+      className={`absolute z-50 bg-white rounded-lg shadow-lg border-2 px-3 py-2 max-w-sm pointer-events-none transform -translate-x-1/2 ${getBorderColorClass(
+        prefectureColor,
+      )}`}
       style={{
         left: position.x,
         top: position.y + 30,
       }}
     >
-      {/* 吹き出しの矢印（上向き） */}
-      <div className="absolute left-1/2 transform -translate-x-1/2 -top-2">
-        <div className={`w-0 h-0 border-l-8 border-r-8 border-b-8 border-transparent ${getBorderColorClass(prefectureColor).replace('border-', 'border-b-')}`} />
-      </div>
-
       <div className="flex flex-col sm:flex-row items-start gap-2">
-        <div className={`px-2 py-1 rounded text-xs font-medium text-white flex-shrink-0 ${getBackgroundColorClass(prefectureColor)}`}>
+        <div
+          className={`px-2 py-1 rounded text-xs font-medium text-white flex-shrink-0 ${getBackgroundColorClass(
+            prefectureColor,
+          )}`}
+        >
           {member.prefecture}
         </div>
         <div className="min-w-0">

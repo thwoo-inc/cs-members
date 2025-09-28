@@ -19,13 +19,49 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [clickPosition, setClickPosition] = useState<{ x: number; y: number } | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
-  // --- 1) 日本向けの地図投影（メルカトル）を作る ---
-  // ビューポートは CSS で管理するので、後でサイズに応じてスケールを更新してもOK
+  // --- 1) 緯度経度を画面比率に合わせて線形マッピングするプロジェクタ ---
+  // 緯度経度の歪み補正は行わず、単純に lng/lat を [0..width] / [0..height] に線形変換する
   const projection = useMemo(() => {
-    // 中心とスケールは適宜調整（ここでは日本だいたい中央）
-    return d3.geoMercator().center([137.0, 38.0]).scale(1600).translate([0, 0]);
-  }, []);
+    // members から表示対象の lng/lat の範囲を算出
+    const coords = members
+      .map((m) => getPrefectureCoordinate(m.prefecture))
+      .filter((c): c is NonNullable<ReturnType<typeof getPrefectureCoordinate>> => !!c);
+
+    // 何もなければ安全なデフォルト（日本付近のざっくりした範囲）
+    if (coords.length === 0) {
+      const minLng = 122;
+      const maxLng = 146;
+      const minLat = 24;
+      const maxLat = 46;
+      const lngRange = Math.max(1e-6, maxLng - minLng);
+      const latRange = Math.max(1e-6, maxLat - minLat);
+      return ([lng, lat]: [number, number]) => {
+        const x = ((lng - minLng) / lngRange) * dimensions.width;
+        const y = ((maxLat - lat) / latRange) * dimensions.height; // y は上が 0 になるよう反転
+        return [x - dimensions.width / 2, y - dimensions.height / 2] as [number, number];
+      };
+    }
+
+    const lngs = coords.map((c) => c.lng);
+    const lats = coords.map((c) => c.lat);
+    const minLng = Math.min(...lngs);
+    const maxLng = Math.max(...lngs);
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+
+    const lngRange = Math.max(1e-6, maxLng - minLng);
+    const latRange = Math.max(1e-6, maxLat - minLat);
+
+    // 画面比率にそのままフィットさせる（x は width、y は height にスケーリング）
+    return ([lng, lat]: [number, number]) => {
+      const x = ((lng - minLng) / lngRange) * dimensions.width;
+      const y = ((maxLat - lat) / latRange) * dimensions.height; // 上原点のため反転
+      // ForceGraph の座標は任意スケールなので、中心が (0,0) になるよう平行移動しておく
+      return [x - dimensions.width / 2, y - dimensions.height / 2] as [number, number];
+    };
+  }, [members, dimensions.width, dimensions.height]);
 
   // --- 2) ノード配列（エッジなし） ---
   const data = useMemo(() => {
@@ -81,7 +117,7 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
     ref.current.d3Force('charge', forceManyBody().strength(-12));
 
     // 衝突回避：アバターサイズに合わせて調整
-    const radius = 18; // px（アバターのサイズより少し大きめ）
+    const radius = 24; // px（アバターのサイズより少し大きめ）
     ref.current.d3Force('collide', forceCollide(radius));
 
     // 重心の周りに軽くバラけさせたい場合（任意）
@@ -101,7 +137,7 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
   }, []);
 
   return (
-    <div className="relative w-full h-full overflow-hidden">
+    <div ref={containerRef} className="relative w-full h-full" style={{ touchAction: 'none' }}>
       <ForceGraph2D
         ref={ref}
         graphData={data}
@@ -114,12 +150,14 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
         // パフォーマンス・操作性
         cooldownTicks={300}
         enableNodeDrag={true}
+        enableZoomInteraction={true}
+        enablePanInteraction={true}
         minZoom={0.25}
         maxZoom={12}
         // カスタムノード描画: 名前の先頭1文字を丸いアバターで表示
         nodeCanvasObject={(node: any, ctx: CanvasRenderingContext2D, scale: number) => {
           const firstChar = node.name ? node.name.charAt(0) : '?';
-          const radius = 15;
+          const radius = 20;
 
           // 都道府県の色情報を取得
           const prefectureInfo = getPrefectureCoordinate(node.pref);
@@ -138,7 +176,7 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
 
           // 文字を描画
           ctx.fillStyle = '#333';
-          ctx.font = '16px sans-serif';
+          ctx.font = '20px sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillText(firstChar, node.x, node.y);
@@ -147,17 +185,18 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
         nodePointerAreaPaint={(node: any, color: string, ctx: CanvasRenderingContext2D) => {
           ctx.fillStyle = color;
           ctx.beginPath();
-          ctx.arc(node.x, node.y, 18, 0, Math.PI * 2);
+          ctx.arc(node.x, node.y, 24, 0, Math.PI * 2);
           ctx.fill();
         }}
         // アバターモードを設定
         nodeCanvasObjectMode={() => 'replace'}
-        // onEngineStop={() => ref.current?.zoomToFit(200, 40)}
+        onBackgroundClick={() => {
+          setSelectedMember(null);
+          setClickPosition(null);
+        }}
         onNodeClick={(node: any, event: any) => {
-          console.log('Node clicked:', node);
           // 対応する会員を検索
           const member = members.find((m) => `${members.indexOf(m)}-${m.name}` === node.id);
-          console.log('Found member:', member);
           if (member) {
             setSelectedMember(member);
             // クリック位置を画面座標で取得
@@ -173,10 +212,10 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
         <MemberTooltip member={selectedMember} position={clickPosition} />
       )}
 
-      {/* 背景クリックで吹き出しを閉じる */}
+      {/* 背景クリックで吹き出しを閉じる（モバイルのパン/ズームを阻害しないよう pointer-events: none） */}
       {selectedMember && (
         <div
-          className="fixed inset-0 z-40"
+          className="fixed inset-0 z-40 pointer-events-none"
           onClick={() => {
             setSelectedMember(null);
             setClickPosition(null);
