@@ -7,6 +7,7 @@ import * as d3 from 'd3-geo';
 import { forceX, forceY, forceCollide, forceManyBody } from 'd3-force';
 import { Member } from '@/types/member';
 import { getPrefectureCoordinate } from '@/data/prefecture';
+import MemberTooltip from '@/components/MemberTooltip';
 
 const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), {
   ssr: false,
@@ -16,6 +17,8 @@ const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), {
 export default function MemberGeoGraph({ members }: { members: Member[] }) {
   const ref = useRef<any>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+  const [selectedMember, setSelectedMember] = useState<Member | null>(null);
+  const [clickPosition, setClickPosition] = useState<{ x: number; y: number } | null>(null);
 
   // --- 1) 日本向けの地図投影（メルカトル）を作る ---
   // ビューポートは CSS で管理するので、後でサイズに応じてスケールを更新してもOK
@@ -70,15 +73,15 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
     if (!ref.current) return;
 
     // --- 3) d3-force のカスタム設定 ---
-    // 居住地の基準点へ引き寄せ（強すぎるとガチガチになるので 0.08 前後から）
-    ref.current.d3Force('x', forceX((n: any) => n._targetX).strength(0.08));
-    ref.current.d3Force('y', forceY((n: any) => n._targetY).strength(0.08));
+    // 居住地の基準点へ引き寄せ（適度な強さで継続的な動きを作る）
+    ref.current.d3Force('x', forceX((n: any) => n._targetX).strength(0.3));
+    ref.current.d3Force('y', forceY((n: any) => n._targetY).strength(0.3));
 
-    // ほどよい反発（弱めのクーロン斥力）
-    ref.current.d3Force('charge', forceManyBody().strength(-5));
+    // ほどよい反発（動きを維持するために少し強めに）
+    ref.current.d3Force('charge', forceManyBody().strength(-12));
 
-    // 衝突回避：見た目より少し大きめに（タップもしやすい）
-    const radius = 6; // px（ズームで相対的に見え方は変わる）
+    // 衝突回避：アバターサイズに合わせて調整
+    const radius = 18; // px（アバターのサイズより少し大きめ）
     ref.current.d3Force('collide', forceCollide(radius));
 
     // 重心の周りに軽くバラけさせたい場合（任意）
@@ -87,6 +90,10 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
     // 高DPRでの過描画を抑制
     ref.current.setCanvasPixelRatio?.(Math.min(window.devicePixelRatio || 1, 2));
 
+    // 継続的な微細な動きのために温度を設定
+    ref.current.d3Force('center', null); // 中心力を無効化
+    ref.current.d3ReheatSimulation(); // シミュレーションを再加熱
+
     // 初期から適切なサイズで表示
     setTimeout(() => {
       ref.current?.zoomToFit(0, 80); // ヘッダー・フッター分を考慮したパディング
@@ -94,50 +101,88 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
   }, []);
 
   return (
-    // <div className="relative w-full h-full">
-    // Zoom値表示
-    // <div className="absolute top-4 right-4 z-10 bg-black/70 text-white px-3 py-1 rounded text-sm">
-    //   Zoom: {zoom.toFixed(2)}
-    // </div>
-    <ForceGraph2D
-      ref={ref}
-      graphData={data}
-      width={dimensions.width}
-      height={dimensions.height}
-      // 見た目
-      nodeRelSize={3}
-      nodeAutoColorBy="pref"
-      linkWidth={0} // エッジなし
-      // パフォーマンス・操作性
-      cooldownTicks={150}
-      enableNodeDrag={true}
-      minZoom={0.25}
-      maxZoom={12}
-      // 当たり判定を広めに（スマホ向け）
-      nodePointerAreaPaint={(node: any, color: string, ctx: CanvasRenderingContext2D) => {
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, 10, 0, Math.PI * 2);
-        ctx.fill();
-      }}
-      // ラベルはズームイン時のみ
-      nodeCanvasObjectMode={() => 'after'}
-      nodeCanvasObject={(node: any, ctx: CanvasRenderingContext2D, scale: number) => {
-        if (scale < 2.5) return;
-        ctx.font = `${12 / scale ** 0.6}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(node.name, node.x, node.y - 10);
-      }}
-      // onEngineStop={() => ref.current?.zoomToFit(200, 40)}
-      onNodeClick={(node: any) => {
-        // クリック/タップでその居住地の塊に寄る
-        const duration = 800;
-        ref.current?.centerAt(node._targetX, node._targetY, duration);
-        ref.current?.zoom(4, duration);
-        // 小窓表示はここで state を立てるなど
-      }}
-    />
-    // </div>
+    <div className="relative w-full h-full overflow-hidden">
+      <ForceGraph2D
+        ref={ref}
+        graphData={data}
+        width={dimensions.width}
+        height={dimensions.height}
+        // 見た目
+        nodeRelSize={15}
+        nodeAutoColorBy="pref"
+        linkWidth={0} // エッジなし
+        // パフォーマンス・操作性
+        cooldownTicks={300}
+        enableNodeDrag={true}
+        minZoom={0.25}
+        maxZoom={12}
+        // カスタムノード描画: 名前の先頭1文字を丸いアバターで表示
+        nodeCanvasObject={(node: any, ctx: CanvasRenderingContext2D, scale: number) => {
+          const firstChar = node.name ? node.name.charAt(0) : '?';
+          const radius = 15;
+
+          // 都道府県の色情報を取得
+          const prefectureInfo = getPrefectureCoordinate(node.pref);
+          const prefectureColor = prefectureInfo?.color || '#333';
+
+          // 円形の背景を描画（白背景）
+          ctx.fillStyle = '#fff';
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
+          ctx.fill();
+
+          // 円形のボーダーを描画（都道府県の色）
+          ctx.strokeStyle = prefectureColor;
+          ctx.lineWidth = 3;
+          ctx.stroke();
+
+          // 文字を描画
+          ctx.fillStyle = '#333';
+          ctx.font = '16px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(firstChar, node.x, node.y);
+        }}
+        // 当たり判定を広めに（スマホ向け）
+        nodePointerAreaPaint={(node: any, color: string, ctx: CanvasRenderingContext2D) => {
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, 18, 0, Math.PI * 2);
+          ctx.fill();
+        }}
+        // アバターモードを設定
+        nodeCanvasObjectMode={() => 'replace'}
+        // onEngineStop={() => ref.current?.zoomToFit(200, 40)}
+        onNodeClick={(node: any, event: any) => {
+          console.log('Node clicked:', node);
+          // 対応する会員を検索
+          const member = members.find((m) => `${members.indexOf(m)}-${m.name}` === node.id);
+          console.log('Found member:', member);
+          if (member) {
+            setSelectedMember(member);
+            // クリック位置を画面座標で取得
+            if (event) {
+              setClickPosition({ x: event.x || event.clientX, y: event.y || event.clientY });
+            }
+          }
+        }}
+      />
+
+      {/* 会員情報吹き出し */}
+      {selectedMember && clickPosition && (
+        <MemberTooltip member={selectedMember} position={clickPosition} />
+      )}
+
+      {/* 背景クリックで吹き出しを閉じる */}
+      {selectedMember && (
+        <div
+          className="fixed inset-0 z-40"
+          onClick={() => {
+            setSelectedMember(null);
+            setClickPosition(null);
+          }}
+        />
+      )}
+    </div>
   );
 }
