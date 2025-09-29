@@ -9,7 +9,7 @@ export function parseCSV(csvContent: string): Member[] {
     const values = line.split(',');
     // 20個のアバター画像を連番でセット
     const avatarIndex = ((index % 20) + 1).toString().padStart(2, '0');
-    const avatarPath = `/img/avator${avatarIndex}.png`;
+    const avatarPath = `./img/avator${avatarIndex}.png`;
 
     return {
       prefecture: values[0],

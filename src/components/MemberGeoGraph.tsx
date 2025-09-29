@@ -240,7 +240,7 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
       const imagePromises: Promise<void>[] = [];
 
       // ロゴ画像を読み込み
-      const logoPath = '/img/logo.png';
+      const logoPath = './img/logo.png';
       if (!imageCache.current.has(logoPath)) {
         const logoPromise = new Promise<void>((resolve) => {
           const img = new Image();
@@ -262,7 +262,7 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
       // 01-20のアバター画像を事前読み込み
       for (let i = 1; i <= 20; i++) {
         const index = i.toString().padStart(2, '0');
-        const path = `/img/avator${index}.png`;
+        const path = `./img/avator${index}.png`;
 
         if (!imageCache.current.has(path)) {
           const promise = new Promise<void>((resolve) => {
@@ -463,7 +463,7 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
             ctx.restore();
 
             // ロゴ画像を描画
-            const logoImage = imageCache.current.get('/img/logo.png');
+            const logoImage = imageCache.current.get('./img/logo.png');
             if (logoImage && logoLoaded) {
               const logoW = 156; // ロゴのサイズ
               const logoH = 75;

@@ -14,7 +14,7 @@ export default async function Home() {
         <div className="container p-4 sm:p-8 flex items-center justify-between mx-auto h-full">
           <h1 className="flex flex-row gap-2 sm:gap-4 font-bold relative items-center">
             <Image
-              src="/img/logo.png"
+              src="./img/logo.png"
               width={468}
               height={225}
               alt="みんなでつくる中国山地 百年会議"
