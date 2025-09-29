@@ -34,7 +34,8 @@ interface GraphNode {
 }
 
 export default function MemberGeoGraph({ members }: { members: Member[] }) {
-  const { displayMode, setDisplayMode } = useAppContext();
+  const { displayMode } = useAppContext();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ref = useRef<any>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
@@ -47,6 +48,7 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
 
   // --- 1) 地理的な力の向きを変更した座標変換（北→右、南→左、中国地方中心） ---
   // 緯度経度の歪み補正は行わず、地理的方向を回転させてマッピング
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const projection = useMemo(() => {
     // 中国地方の都道府県を定義
     const chugokuRegion = ['鳥取県', '島根県', '岡山県', '広島県', '山口県'];
@@ -232,7 +234,7 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
     };
 
     return { nodes: [rootNode, ...nodes], links: [] };
-  }, [members, projection]);
+  }, [members]);
 
   // アバター画像とロゴを事前に読み込んでキャッシュ
   useEffect(() => {
@@ -319,9 +321,8 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
 
     // --- 3) d3-force のカスタム設定（中心からの放射状配置） ---
     // Rootノードを中心に固定する力
-    ref.current.d3Force('center-root', function (alpha: number) {
+    ref.current.d3Force('center-root', function () {
       const nodes = data.nodes as (GraphNode & { vx: number; vy: number })[];
-      const strength = 1.0; // Rootノードは強固定
 
       nodes.forEach((node) => {
         if (node._isRoot) {
@@ -396,6 +397,7 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
     // 衝突回避：アバターサイズに合わせて調整
     ref.current.d3Force(
       'collide',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       forceCollide().radius((node: any) => {
         if (node._isRoot) {
           return 70; // Rootノードは大きな衝突半径
@@ -442,6 +444,7 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
         minZoom={0.25}
         maxZoom={12}
         // カスタムノード描画: Rootノードと会員ノードを区別して描画
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         nodeCanvasObject={(node: any, ctx: CanvasRenderingContext2D) => {
           // Rootノードの描画
           if (node._isRoot) {
@@ -530,6 +533,7 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
           }
         }}
         // 当たり判定を広めに（スマホ向け）
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         nodePointerAreaPaint={(node: any, color: string, ctx: CanvasRenderingContext2D) => {
           // Rootノードはクリック不可
           if (node._isRoot) return;
@@ -552,7 +556,8 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
           // ズーム終了時にもツールチップを閉じる（念のため）
           setSelectedMember(null);
         }}
-        onNodeClick={(node: any, event: any) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        onNodeClick={(node: any) => {
           // Rootノードはクリック不可
           if (node._isRoot) return;
 
@@ -566,10 +571,7 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
 
       {/* 会員情報吹き出し */}
       {selectedMember && (
-        <MemberTooltip
-          member={selectedMember}
-          onClose={() => setSelectedMember(null)}
-        />
+        <MemberTooltip member={selectedMember} onClose={() => setSelectedMember(null)} />
       )}
     </div>
   );
