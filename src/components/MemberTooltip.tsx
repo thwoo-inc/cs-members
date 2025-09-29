@@ -1,16 +1,12 @@
 import { getPrefectureCoordinate } from '@/data/prefecture';
 import { Member } from '@/types/member';
+import Image from 'next/image';
 
 // 会員情報吹き出しコンポーネント
-const MemberTooltip = ({
-  member,
-  position,
-}: {
-  member: Member;
-  position: { x: number; y: number };
-}) => {
+const MemberTooltip = ({ member, onClose }: { member: Member; onClose: () => void }) => {
   const prefectureInfo = getPrefectureCoordinate(member.prefecture);
   const prefectureColor = prefectureInfo?.color || '#333';
+
 
   // 都道府県の色に対応するTailwindクラスを取得
   const getBorderColorClass = (color: string) => {
@@ -46,31 +42,56 @@ const MemberTooltip = ({
   };
 
   return (
-    <div
-      className={`absolute z-50 bg-white rounded-lg shadow-lg border-2 px-3 py-2 max-w-sm pointer-events-none transform -translate-x-1/2 ${getBorderColorClass(
-        prefectureColor,
-      )}`}
-      style={{
-        left: position.x,
-        top: position.y + 30,
-      }}
-    >
-      <div className="flex flex-col sm:flex-row items-start gap-2">
-        <div
-          className={`px-2 py-1 rounded text-xs font-medium text-white flex-shrink-0 ${getBackgroundColorClass(
-            prefectureColor,
-          )}`}
-        >
-          {member.prefecture}
-        </div>
-        <div className="min-w-0">
-          <div className="font-semibold text-gray-800 text-sm">{member.name}</div>
-          {member.organization && (
-            <div className="text-xs text-gray-600 mt-1">{member.organization}</div>
-          )}
+    <>
+      {/* 背景オーバーレイ */}
+      {/* <div
+        className="fixed inset-0 z-40 bg-white bg-opacity-50"
+        onClick={onClose}
+      /> */}
+
+      {/* モーダルコンテンツ */}
+      <div
+        className={`fixed z-50 bg-white bg-opacity-90 rounded-lg shadow-lg border-2 px-4 py-3 max-w-sm transform -translate-x-1/2 -translate-y-1/2 cursor-pointer ${getBorderColorClass(
+          prefectureColor,
+        )}`}
+        style={{
+          left: '50%',
+          top: '50%',
+        }}
+        onClick={onClose}
+      >
+        <div className="flex flex-col items-center gap-3">
+          {/* 都道府県ラベル */}
+          <div
+            className={`px-2 py-1 rounded text-xs font-medium text-white ${getBackgroundColorClass(
+              prefectureColor,
+            )}`}
+          >
+            {member.prefecture}
+          </div>
+
+          {/* サムネイル画像 */}
+          <div className="relative w-16 h-16">
+            <Image
+              src={member.avatarPath}
+              alt={`${member.name}のアバター`}
+              width={64}
+              height={64}
+              className="rounded-full object-cover border-2"
+              style={{ borderColor: prefectureColor }}
+            />
+          </div>
+
+          {/* 名前と組織 */}
+          <div className="text-center">
+            <div className="font-semibold text-gray-800 text-sm">{`${member.name} さん`}</div>
+            {member.organization && (
+              <div className="text-xs text-gray-600 mt-1">{member.organization}</div>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 };
 

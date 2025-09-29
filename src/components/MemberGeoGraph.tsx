@@ -38,7 +38,6 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
   const ref = useRef<any>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
-  const [clickPosition, setClickPosition] = useState<{ x: number; y: number } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   // 画像キャッシュ（アバター + ロゴ）
@@ -199,16 +198,12 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
         const x0 = centerX + radius * Math.cos(angle);
         const y0 = centerY + radius * Math.sin(angle);
 
-        // アバター画像パスを事前に計算（01-20のループ）
-        const avatarIndex = ((index % 20) + 1).toString().padStart(2, '0');
-        const avatarPath = `/img/avator${avatarIndex}.png`;
-
         return {
           id: `${index}-${m.name}`,
           name: m.name,
           pref: m.prefecture,
           firstChar: m.name ? m.name.charAt(0) : '?',
-          avatarPath: avatarPath,
+          avatarPath: m.avatarPath,
           _targetX: x0,
           _targetY: y0,
           x: x0,
@@ -548,17 +543,14 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
         nodeCanvasObjectMode={() => 'replace'}
         onBackgroundClick={() => {
           setSelectedMember(null);
-          setClickPosition(null);
         }}
         onZoom={() => {
           // ズーム操作時にツールチップを閉じる
           setSelectedMember(null);
-          setClickPosition(null);
         }}
         onZoomEnd={() => {
           // ズーム終了時にもツールチップを閉じる（念のため）
           setSelectedMember(null);
-          setClickPosition(null);
         }}
         onNodeClick={(node: any, event: any) => {
           // Rootノードはクリック不可
@@ -568,27 +560,15 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
           const member = members.find((m) => `${members.indexOf(m)}-${m.name}` === node.id);
           if (member) {
             setSelectedMember(member);
-            // クリック位置を画面座標で取得
-            if (event) {
-              setClickPosition({ x: event.x || event.clientX, y: event.y || event.clientY });
-            }
           }
         }}
       />
 
       {/* 会員情報吹き出し */}
-      {selectedMember && clickPosition && (
-        <MemberTooltip member={selectedMember} position={clickPosition} />
-      )}
-
-      {/* 背景クリックで吹き出しを閉じる（モバイルのパン/ズームを阻害しないよう pointer-events: none） */}
       {selectedMember && (
-        <div
-          className="fixed inset-0 z-40 pointer-events-none"
-          onClick={() => {
-            setSelectedMember(null);
-            setClickPosition(null);
-          }}
+        <MemberTooltip
+          member={selectedMember}
+          onClose={() => setSelectedMember(null)}
         />
       )}
     </div>
