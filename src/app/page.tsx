@@ -1,20 +1,34 @@
 import { loadMembers } from '@/lib/csv';
 import MemberGeoGraph from '@/components/MemberGeoGraph';
+import HamburgerMenu from '@/components/HamburgerMenu';
 import Link from 'next/link';
 import { ExternalLink } from 'lucide-react';
+import Image from 'next/image';
 
 export default async function Home() {
   const members = loadMembers();
 
   return (
     <main className="font-sans min-h-screen relative flex flex-col">
-      <header className="absolute flex top-0 justify-center items-center sm:text-2xl font-bold z-10 bg-[#F0F0F0]/80 w-full h-[60px] sm:h-[100px] sm:p-8">
-        <h1 className="">みんなでつくる中国山地 百年会議 会員マップ</h1>
+      <header className="absolute top-0 z-10 bg-[#F0F0F0]/80 w-full h-[40px] sm:h-[64px]">
+        <div className="container p-4 sm:p-8 flex items-center justify-between mx-auto h-full">
+          <h1 className="flex flex-row gap-2 sm:gap-4 font-bold relative items-center">
+            <Image
+              src="/img/logo.png"
+              width={468}
+              height={225}
+              alt="みんなでつくる中国山地 百年会議"
+              className="w-[52px] sm:w-[104px] h-[25px] sm:h-[50px] "
+            />
+            <p className="text-sm sm:text-base">会員マップ</p>
+          </h1>
+          <HamburgerMenu />
+        </div>
       </header>
       <div className="w-full min-h-screen relative">
         <MemberGeoGraph members={members} />
       </div>
-      <footer className="absolute flex justify-center items-center bottom-0 text-sm sm:text-base z-10 h-[40px] sm:h-[60px] bg-[#F0F0F0]/80 w-full p-4">
+      <footer className="absolute flex justify-center items-center bottom-0 text-xs sm:text-sm z-10 h-[24px] sm:h-[36px] bg-[#F0F0F0]/80 w-full p-4">
         <Link
           className="hover:underline hover:underline-offset-4 flex items-center gap-2"
           href="https://cs-editors.site/"

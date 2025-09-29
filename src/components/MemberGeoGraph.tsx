@@ -3,17 +3,18 @@
 
 import dynamic from 'next/dynamic';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { forceX, forceY, forceCollide, forceManyBody } from 'd3-force';
+import { forceCollide, forceManyBody } from 'd3-force';
 import { Member } from '@/types/member';
 import { getPrefectureCoordinate } from '@/data/prefecture';
 import MemberTooltip from '@/components/MemberTooltip';
+import { useAppContext } from '@/contexts/AppContext';
+
+export type DisplayMode = 'initial' | 'thumbnail';
 
 const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), {
   ssr: false,
-  loading: () => <div>Loading...</div>,
+  loading: () => null,
 });
-
-type DisplayMode = 'initial' | 'thumbnail';
 
 interface GraphNode {
   id: string;
@@ -29,19 +30,21 @@ interface GraphNode {
   vy?: number;
   _angle?: number;
   _radius?: number;
+  _isRoot?: boolean;
 }
 
 export default function MemberGeoGraph({ members }: { members: Member[] }) {
+  const { displayMode, setDisplayMode } = useAppContext();
   const ref = useRef<any>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [clickPosition, setClickPosition] = useState<{ x: number; y: number } | null>(null);
-  const [displayMode, setDisplayMode] = useState<DisplayMode>('initial');
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  // 画像キャッシュ
+  // 画像キャッシュ（アバター + ロゴ）
   const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
   const [imagesLoaded, setImagesLoaded] = useState(false);
+  const [logoLoaded, setLogoLoaded] = useState(false);
 
   // --- 1) 地理的な力の向きを変更した座標変換（北→右、南→左、中国地方中心） ---
   // 緯度経度の歪み補正は行わず、地理的方向を回転させてマッピング
@@ -93,17 +96,17 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
       const y = ((maxLng - lng) / lngRange) * dimensions.height; // 経度を反転してy軸に
 
       // 中国地方のメンバーが多い場合は、その地域を中心に近づける
-      const isChugoku = chugokuRegion.some(pref =>
-        members.some(m => m.prefecture === pref)
-      );
+      const isChugoku = chugokuRegion.some((pref) => members.some((m) => m.prefecture === pref));
 
       let adjustedX = x - dimensions.width / 2;
       let adjustedY = y - dimensions.height / 2;
 
       // 中国地方のメンバーがいる場合、中央寄りに調整
       if (isChugoku) {
-        const chugokuCenterX = ((centerLat - minLat) / latRange) * dimensions.width - dimensions.width / 2;
-        const chugokuCenterY = ((maxLng - centerLng) / lngRange) * dimensions.height - dimensions.height / 2;
+        const chugokuCenterX =
+          ((centerLat - minLat) / latRange) * dimensions.width - dimensions.width / 2;
+        const chugokuCenterY =
+          ((maxLng - centerLng) / lngRange) * dimensions.height - dimensions.height / 2;
 
         // 中国地方の中心を画面中央に近づけるためのオフセット
         const offsetX = -chugokuCenterX * 0.3;
@@ -117,7 +120,7 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
     };
   }, [members, dimensions.width, dimensions.height]);
 
-  // --- 2) 都道府県比率に応じた方位分割とノード配列 ---
+  // --- 2) 都道府県比率に応じた方位分割とノード配列（Rootノード含む） ---
   const data = useMemo(() => {
     // 都道府県別のメンバー数をカウント
     const prefectureCount = members.reduce((acc, member) => {
@@ -135,7 +138,10 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
 
     // 方位角を比率に応じて割り当て
     let currentAngle = 0;
-    const prefectureAngles: Record<string, { startAngle: number; endAngle: number; centerAngle: number }> = {};
+    const prefectureAngles: Record<
+      string,
+      { startAngle: number; endAngle: number; centerAngle: number }
+    > = {};
 
     sortedPrefectures.forEach(({ pref, ratio }) => {
       const angleRange = ratio * 2 * Math.PI; // 比率に応じた角度範囲
@@ -168,8 +174,8 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
         }
 
         // 都道府県内の何番目のメンバーかを計算
-        const membersInPref = members.filter(member => member.prefecture === m.prefecture);
-        const memberIndexInPref = membersInPref.findIndex(member => member.name === m.name);
+        const membersInPref = members.filter((member) => member.prefecture === m.prefecture);
+        const memberIndexInPref = membersInPref.findIndex((member) => member.name === m.name);
         const totalInPref = membersInPref.length;
 
         // 都道府県内での方位角を計算（範囲内で均等分布）
@@ -183,10 +189,11 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
           angle = angleInfo.startAngle + angleStep * (memberIndexInPref + 0.5);
         }
 
-        // 中心からの距離（都道府県のメンバー数に応じて調整）
+        // 中心からの距離（Rootノードと重ならないよう調整）
+        const minRadius = 90; // Rootノード（半径65px）とのクリアランスを保つ
         const baseRadius = 120; // ベース距離
-        const radiusVariation = 40; // 距離のバリエーション
-        const radius = baseRadius + (Math.random() - 0.5) * radiusVariation;
+        const radiusVariation = 50; // 距離のバリエーション
+        const radius = Math.max(minRadius, baseRadius + (Math.random() - 0.5) * radiusVariation);
 
         // 極座標から直交座標に変換
         const x0 = centerX + radius * Math.cos(angle);
@@ -208,19 +215,56 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
           y: y0,
           _angle: angle,
           _radius: radius,
+          _isRoot: false,
         };
       })
       .filter((node): node is NonNullable<typeof node> => node !== null);
 
-    return { nodes, links: [] };
+    // Rootノードを中心に追加（会員とは異なる特別ノード）
+    const rootNode = {
+      id: 'root-community',
+      name: 'みんなでつくる中国山地百年会議',
+      pref: '',
+      firstChar: '',
+      avatarPath: '',
+      _targetX: 0,
+      _targetY: 0,
+      x: 0,
+      y: 0,
+      _angle: 0,
+      _radius: 0,
+      _isRoot: true,
+    };
+
+    return { nodes: [rootNode, ...nodes], links: [] };
   }, [members, projection]);
 
-  // アバター画像を事前に読み込んでキャッシュ
+  // アバター画像とロゴを事前に読み込んでキャッシュ
   useEffect(() => {
     const loadImages = async () => {
       const imagePromises: Promise<void>[] = [];
 
-      // 01-20の画像を事前読み込み
+      // ロゴ画像を読み込み
+      const logoPath = '/img/logo.png';
+      if (!imageCache.current.has(logoPath)) {
+        const logoPromise = new Promise<void>((resolve) => {
+          const img = new Image();
+          img.onload = () => {
+            imageCache.current.set(logoPath, img);
+            setLogoLoaded(true);
+            resolve();
+          };
+          img.onerror = () => {
+            console.warn('Logo image failed to load:', logoPath);
+            setLogoLoaded(false);
+            resolve();
+          };
+          img.src = logoPath;
+        });
+        imagePromises.push(logoPromise);
+      }
+
+      // 01-20のアバター画像を事前読み込み
       for (let i = 1; i <= 20; i++) {
         const index = i.toString().padStart(2, '0');
         const path = `/img/avator${index}.png`;
@@ -279,13 +323,29 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
     if (!ref.current) return;
 
     // --- 3) d3-force のカスタム設定（中心からの放射状配置） ---
-    // 中心からの放射状配置を維持する力
-    ref.current.d3Force('radial', function(alpha: number) {
+    // Rootノードを中心に固定する力
+    ref.current.d3Force('center-root', function (alpha: number) {
+      const nodes = data.nodes as (GraphNode & { vx: number; vy: number })[];
+      const strength = 1.0; // Rootノードは強固定
+
+      nodes.forEach((node) => {
+        if (node._isRoot) {
+          // Rootノードを中心に固定
+          node.x = 0;
+          node.y = 0;
+          node.vx = 0;
+          node.vy = 0;
+        }
+      });
+    });
+
+    // 中心からの放射状配置を維持する力（会員ノードのみ）
+    ref.current.d3Force('radial', function (alpha: number) {
       const nodes = data.nodes as (GraphNode & { vx: number; vy: number })[];
       const strength = 0.3 * alpha;
 
-      nodes.forEach(node => {
-        if (node._angle !== undefined && node._radius !== undefined) {
+      nodes.forEach((node) => {
+        if (!node._isRoot && node._angle !== undefined && node._radius !== undefined) {
           // 目標位置を極座標から計算
           const targetX = node._radius * Math.cos(node._angle);
           const targetY = node._radius * Math.sin(node._angle);
@@ -301,7 +361,7 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
     });
 
     // 同じ都道府県内での引き寄せ力（方位角を維持しながら）
-    ref.current.d3Force('prefecture', function(alpha: number) {
+    ref.current.d3Force('prefecture', function (alpha: number) {
       const nodes = data.nodes as (GraphNode & { vx: number; vy: number })[];
       const strength = 0.1 * alpha;
 
@@ -310,12 +370,17 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
         for (let j = i + 1; j < nodes.length; j++) {
           const nodeB = nodes[j];
           // 同じ都道府県のノード同士を引き寄せる（距離方向のみ）
-          if (nodeA.pref === nodeB.pref && nodeA._angle !== undefined && nodeB._angle !== undefined) {
+          if (
+            nodeA.pref === nodeB.pref &&
+            nodeA._angle !== undefined &&
+            nodeB._angle !== undefined
+          ) {
             const dx = nodeB.x - nodeA.x;
             const dy = nodeB.y - nodeA.y;
             const distance = Math.sqrt(dx * dx + dy * dy);
 
-            if (distance > 0 && distance > 30) { // 距離が遠い場合のみ引き寄せる
+            if (distance > 0 && distance > 30) {
+              // 距離が遠い場合のみ引き寄せる
               const force = strength / distance;
               const fx = dx * force * 0.5; // 放射状配置を保つため弱めに
               const fy = dy * force * 0.5;
@@ -334,8 +399,15 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
     ref.current.d3Force('charge', forceManyBody().strength(-5));
 
     // 衝突回避：アバターサイズに合わせて調整
-    const radius = 18; // px（アバターのサイズより少し小さめ）
-    ref.current.d3Force('collide', forceCollide(radius));
+    ref.current.d3Force(
+      'collide',
+      forceCollide().radius((node: any) => {
+        if (node._isRoot) {
+          return 70; // Rootノードは大きな衝突半径
+        }
+        return 18; // 会員ノードは通常サイズ
+      }),
+    );
 
     // 高DPRでの過描画を抑制
     ref.current.setCanvasPixelRatio?.(Math.min(window.devicePixelRatio || 1, 2));
@@ -358,28 +430,6 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
 
   return (
     <div ref={containerRef} className="relative w-full h-full" style={{ touchAction: 'none' }}>
-      {/* タブ切り替えUI */}
-      <div className="absolute top-[72px] sm:top-[108px] left-4 z-50 flex bg-white/90 backdrop-blur-sm rounded-lg shadow-md overflow-hidden">
-        <button
-          onClick={() => setDisplayMode('initial')}
-          className={`px-4 py-2 text-sm font-medium transition-colors ${
-            displayMode === 'initial' ? 'bg-blue-500 text-white' : 'text-gray-700 hover:bg-gray-100'
-          }`}
-        >
-          頭文字
-        </button>
-        <button
-          onClick={() => setDisplayMode('thumbnail')}
-          className={`px-4 py-2 text-sm font-medium transition-colors ${
-            displayMode === 'thumbnail'
-              ? 'bg-blue-500 text-white'
-              : 'text-gray-700 hover:bg-gray-100'
-          }`}
-        >
-          サムネイル
-        </button>
-      </div>
-
       <ForceGraph2D
         ref={ref}
         graphData={data}
@@ -396,8 +446,39 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
         enablePanInteraction={true}
         minZoom={0.25}
         maxZoom={12}
-        // カスタムノード描画: 表示モードに応じて頭文字またはアバター画像を表示
+        // カスタムノード描画: Rootノードと会員ノードを区別して描画
         nodeCanvasObject={(node: any, ctx: CanvasRenderingContext2D) => {
+          // Rootノードの描画
+          if (node._isRoot) {
+            const rootRadius = 85; // Rootノードは大きめ
+
+            // 白い半透明の正円背景
+            ctx.save();
+            ctx.globalAlpha = 0.7;
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, rootRadius, 0, Math.PI * 2);
+            ctx.fill();
+
+            // ボーダー
+            ctx.globalAlpha = 0.9;
+            ctx.strokeStyle = '#ddd';
+            ctx.lineWidth = 4;
+            ctx.stroke();
+            ctx.restore();
+
+            // ロゴ画像を描画
+            const logoImage = imageCache.current.get('/img/logo.png');
+            if (logoImage && logoLoaded) {
+              const logoW = 156; // ロゴのサイズ
+              const logoH = 75;
+              ctx.drawImage(logoImage, node.x - logoW / 2, node.y - logoH / 2, logoW, logoH);
+            }
+
+            return;
+          }
+
+          // 会員ノードの描画
           const radius = 20;
 
           // 都道府県の色情報を取得
@@ -435,7 +516,7 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
             ctx.stroke();
           } else {
             // 頭文字表示モード: 事前設定された頭文字を使用
-            ctx.fillStyle = '#fff';
+            ctx.fillStyle = '#fffc';
             ctx.beginPath();
             ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
             ctx.fill();
@@ -455,6 +536,9 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
         }}
         // 当たり判定を広めに（スマホ向け）
         nodePointerAreaPaint={(node: any, color: string, ctx: CanvasRenderingContext2D) => {
+          // Rootノードはクリック不可
+          if (node._isRoot) return;
+
           ctx.fillStyle = color;
           ctx.beginPath();
           ctx.arc(node.x, node.y, 24, 0, Math.PI * 2);
@@ -477,6 +561,9 @@ export default function MemberGeoGraph({ members }: { members: Member[] }) {
           setClickPosition(null);
         }}
         onNodeClick={(node: any, event: any) => {
+          // Rootノードはクリック不可
+          if (node._isRoot) return;
+
           // 対応する会員を検索
           const member = members.find((m) => `${members.indexOf(m)}-${m.name}` === node.id);
           if (member) {
