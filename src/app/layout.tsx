@@ -25,7 +25,18 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ja">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased relative`}>
+        {/* ブラー背景画像 */}
+        <div
+          className="fixed inset-0 bg-cover bg-center bg-no-repeat bg-fixed blur-[3px] -z-20"
+          style={{
+            backgroundImage: "url('./img/bg.jpg')",
+          }}
+        />
+
+        {/* 半透明オーバーレイ */}
+        <div className="fixed inset-0 bg-white/50 -z-10" />
+
         <AppProvider>{children}</AppProvider>
       </body>
     </html>
